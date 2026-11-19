@@ -1,0 +1,12 @@
+table inet hyst_guard {
+  chain out {
+    type filter hook output priority 0; policy accept;
+    # inner (plaintext) traffic must only leave via warp / loopback
+    meta skuid "hysteria" oifname { "warp", "lo" } accept
+    # wireguard outer packets to the WARP endpoint are emitted in hysteria's task context
+    meta skuid "hysteria" udp dport 2408 accept
+    # replies to clients on the listen ports
+    meta skuid "hysteria" udp sport { 443, 8443 } accept
+    meta skuid "hysteria" counter reject
+  }
+}

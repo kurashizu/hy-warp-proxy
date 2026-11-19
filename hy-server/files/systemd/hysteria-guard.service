@@ -1,0 +1,12 @@
+[Unit]
+Description=Block hysteria/speeder egress except via warp (anti home-IP leak)
+Before=hysteria-server.service speederv2-server.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/hysteria-stack/bin/nft -f /etc/hysteria/guard.nft
+ExecStop=-/usr/local/lib/hysteria-stack/bin/nft delete table inet hyst_guard
+
+[Install]
+WantedBy=multi-user.target

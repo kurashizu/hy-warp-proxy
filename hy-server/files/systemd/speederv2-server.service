@@ -1,0 +1,13 @@
+[Unit]
+Description=UDPspeeder FEC tunnel (server) -> hysteria
+After=network-online.target hysteria-server.service
+Wants=network-online.target
+
+[Service]
+User=hysteria
+ExecStart=/usr/local/bin/speederv2 -s -l0.0.0.0:8443 -r127.0.0.1:443 -k @SPEEDER_KEY@ -f1:31,2:30,4:28,8:24,13:19,20:12 --mode 0 --mtu 1350 --timeout 8 -i 10 --report 30 --disable-color
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

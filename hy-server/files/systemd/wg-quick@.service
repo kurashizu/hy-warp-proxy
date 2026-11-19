@@ -1,0 +1,15 @@
+[Unit]
+Description=WireGuard via bundled wg-quick for %i
+After=network-online.target nss-lookup.target
+Wants=network-online.target nss-lookup.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=/usr/local/lib/hysteria-stack/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=WG_ENDPOINT_RESOLUTION_RETRIES=infinity
+ExecStart=/usr/local/lib/hysteria-stack/bin/wg-quick up %i
+ExecStop=/usr/local/lib/hysteria-stack/bin/wg-quick down %i
+
+[Install]
+WantedBy=multi-user.target

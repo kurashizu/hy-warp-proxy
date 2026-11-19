@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# hy-limit: aggregate bandwidth limit for the proxy server (all clients together).
+# Enforced by the kernel (tc) on the "warp" interface that every client byte passes through:
+#   up   = client -> internet   (egress of warp, HTB + fq_codel)
+#   down = internet -> client   (ingress of warp, redirected to an ifb device and shaped there)
+# Rates are megabits/s etc.:  50mbit  500kbit  1gbit   (also: 50M, 1G). "off" / 0 = unlimited.
+#
+#   hy-limit show
+#   hy-limit set [--up RATE] [--down RATE]     persist in /etc/hysteria/limit.env and apply now
+#   hy-limit off                               remove both limits
+#   hy-limit apply                             (re)apply from the config file (run automatically when warp comes up)
+#
+# Note: the limit counts payload on the warp interface. With FEC (UDPspeeder) the wire traffic on the
+# public NIC is larger than what the clients see (up to ~1.6x at high rates, more at low rates).
+set -u
+PATH=/usr/local/lib/hysteria-stack/bin:$PATH
+CONF=${HY_LIMIT_CONF:-/etc/hysteria/limit.env}
+DEV=${HY_LIMIT_DEV:-warp}
+IFB=${HY_LIMIT_IFB:-ifb-hy}
+
+die() { echo "hy-limit: $*" >&2; exit 1; }
+
+norm() { # 50M -> 50mbit ; off/0/"" -> "" ; invalid -> return 1
+  local v=${1,,}; v=${v// /}
+  case $v in ""|0|off|none|unlimited) echo ""; return 0 ;; esac
+  [[ $v =~ ^([0-9]+(\.[0-9]+)?)(k|kbit|m|mbit|g|gbit)$ ]] || return 1
+  local n=${BASH_REMATCH[1]} u=${BASH_REMATCH[3]}
+  case $u in k|kbit) u=kbit ;; m|mbit) u=mbit ;; g|gbit) u=gbit ;; esac
+  echo "$n$u"
+}
+
+getv() { [ -f "$CONF" ] && grep -E "^$1=" "$CONF" | tail -1 | cut -d= -f2- | tr -d '"' || true; }
+
+setv() { # setv KEY VALUE
+  mkdir -p "$(dirname "$CONF")"
+  touch "$CONF"
+  if grep -q "^$1=" "$CONF"; then sed -i "s|^$1=.*|$1=$2|" "$CONF"; else echo "$1=$2" >> "$CONF"; fi
+}
+
+clear_all() {
+  tc qdisc del dev "$DEV" root 2>/dev/null
+  tc qdisc del dev "$DEV" ingress 2>/dev/null
+  ip link del "$IFB" 2>/dev/null
+  return 0
+}
+
+shape() { # shape DEVICE RATE
+  tc qdisc add dev "$1" root handle 1: htb default 1 &&
+  tc class add dev "$1" parent 1: classid 1:1 htb rate "$2" ceil "$2" burst 64k cburst 64k quantum 1514 &&
+  tc qdisc add dev "$1" parent 1:1 handle 10: fq_codel
+}
+
+apply() {
+  command -v tc >/dev/null || die "tc not found (install iproute2)"
+  ip link show "$DEV" >/dev/null 2>&1 || { echo "hy-limit: interface $DEV is not up; nothing to do"; return 0; }
+  local up down rc=0
+  up=$(norm "$(getv LIMIT_UP)") || die "bad LIMIT_UP in $CONF"
+  down=$(norm "$(getv LIMIT_DOWN)") || die "bad LIMIT_DOWN in $CONF"
+  clear_all
+  if [ -n "$up" ]; then
+    shape "$DEV" "$up" || { echo "hy-limit: FAILED to apply upload limit $up on $DEV" >&2; rc=1; }
+  fi
+  if [ -n "$down" ]; then
+    { modprobe ifb numifbs=0 2>/dev/null; true; }
+    if ip link add "$IFB" type ifb 2>/dev/null && ip link set "$IFB" up &&
+       tc qdisc add dev "$DEV" handle ffff: ingress &&
+       tc filter add dev "$DEV" parent ffff: protocol all u32 match u32 0 0 action mirred egress redirect dev "$IFB" &&
+       shape "$IFB" "$down"; then
+      :
+    else
+      echo "hy-limit: FAILED to apply download limit $down (kernel needs ifb, sch_htb, cls_u32, act_mirred)" >&2
+      tc qdisc del dev "$DEV" ingress 2>/dev/null; ip link del "$IFB" 2>/dev/null
+      rc=1
+    fi
+  fi
+  echo "hy-limit: up=${up:-unlimited} down=${down:-unlimited} on $DEV (rc=$rc)"
+  return $rc
+}
+
+show() {
+  echo "config ($CONF): LIMIT_UP=$(getv LIMIT_UP) LIMIT_DOWN=$(getv LIMIT_DOWN)"
+  echo "--- $DEV egress (upload):";  tc -s qdisc show dev "$DEV" 2>&1 | grep -E "^qdisc (htb|fq_codel)|Sent" | head -6
+  echo "--- $DEV ingress -> $IFB (download):"; tc -s qdisc show dev "$IFB" 2>&1 | grep -E "^qdisc (htb|fq_codel)|Sent" | head -6
+}
+
+[ "$(id -u)" = 0 ] || die "run as root"
+cmd=${1:-show}; shift || true
+case $cmd in
+  show) show ;;
+  apply) apply ;;
+  off) setv LIMIT_UP ""; setv LIMIT_DOWN ""; apply ;;
+  set)
+    [ $# -gt 0 ] || die "usage: hy-limit set [--up RATE] [--down RATE]"
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --up)   v=$(norm "${2:-}") || die "bad rate '${2:-}' (use e.g. 50mbit, 500kbit, 1gbit, off)"; setv LIMIT_UP "$v"; shift 2 ;;
+        --down) v=$(norm "${2:-}") || die "bad rate '${2:-}' (use e.g. 50mbit, 500kbit, 1gbit, off)"; setv LIMIT_DOWN "$v"; shift 2 ;;
+        *) die "unknown option $1" ;;
+      esac
+    done
+    apply ;;
+  *) sed -n 2,13p "$0"; exit 1 ;;
+esac
