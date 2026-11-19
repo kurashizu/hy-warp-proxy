@@ -3,7 +3,7 @@
 Hysteria2 (+ optional UDPspeeder FEC) proxy server whose **only** exit is Cloudflare WARP, plus a cross-platform
 client gateway (`hygw`) that gives QEMU VMs a virtual NIC which is either fully on the WARP exit or fully offline.
 
-- `hy-server/` – server installer for an x86_64 Linux VPS with systemd. No package manager is used: static
+- `hy-server/` – server installer for an x86_64 Linux VPS with systemd.  Uses kernel WireGuard if present, otherwise the bundled userspace `wireguard-go`. No package manager is used: static
   `wg wg-quick ip tc nft wgcf hytool` are bundled in the release. Fresh password, cert and WARP device on every install.
   Optional aggregate speed limit (`--limit-up/--limit-down`). Has a `SKILL.md` so an agent can deploy it.
 - `hy-client/` – `hygw` (Go source in `src/`), installers for Linux/macOS/Windows, and a `SKILL.md` so an agent can

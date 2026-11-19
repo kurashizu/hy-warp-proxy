@@ -26,7 +26,7 @@ sudo ./install.sh --regen-cert    # 只生成新的自签证书(客户端 CERT_P
 | systemd 依赖 | WARP 起不来 -> hysteria 不启动(失败即关闭) |
 
 ## 要求
-- x86_64 Linux + systemd,内核 >= 5.6(自带 WireGuard),需要 root
+- x86_64 Linux + systemd,内核自带 WireGuard(>= 5.6),或有 `/dev/net/tun`(此时自动改用包内 `wireguard-go` 用户态实现,性能略低,适合 Oracle UEK 这类没有 WireGuard 模块的内核),需要 root
 - 发行版:任意(只要 x86_64 + systemd + bash)。**安装过程不使用任何发行版包管理器**:`wg`/`wg-quick`/`ip`/`tc`/`nft`/`wgcf`/`hytool`(替代 curl+openssl)都是包内静态二进制,装到 `/usr/local/lib/hysteria-stack`;系统只需已有 bash、useradd、awk、sed、grep、coreutils。联网需求仅 `--regen-warp` 时访问 Cloudflare API(不加则完全离线)
 - 放行 **UDP 443**(直连)和 **UDP 8443**(FEC);云主机要在安全组里放行,家里要在路由器做端口转发
 - 能访问 Cloudflare WARP(UDP 2408 出站)

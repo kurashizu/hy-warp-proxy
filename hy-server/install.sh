@@ -40,15 +40,20 @@ command -v systemctl >/dev/null || die "systemd required"
 say "Installing bundled tools (no package manager, nothing is downloaded)"
 HY=/usr/local/lib/hysteria-stack
 install -d -m 755 "$HY/bin"
-for t in wg wg-quick ip tc nft hytool wgcf; do install -m 755 "$F/bin/$t" "$HY/bin/$t"; done
+for t in wg wg-quick wireguard-go ip tc nft hytool wgcf; do install -m 755 "$F/bin/$t" "$HY/bin/$t"; done
 install -m 644 "$F/etc/ca-bundle.crt" "$HY/ca-bundle.crt"
 export PATH="$HY/bin:$PATH" SSL_CERT_FILE="$HY/ca-bundle.crt"
 for t in bash useradd awk sed grep install mktemp; do command -v $t >/dev/null || die "required system tool missing: $t"; done
 for t in wg ip tc nft hytool; do "$HY/bin/$t" $( [ $t = wg ] && echo --version || { [ $t = hytool ] && echo rand || { [ $t = nft ] && echo -v || echo -V; }; } ) >/dev/null 2>&1 || die "bundled $t does not run on this system"; done
 
-say "Checking kernel WireGuard support"
-if ip link add wgchk0 type wireguard 2>/dev/null; then ip link del wgchk0; else modprobe wireguard 2>/dev/null || true
-  ip link add wgchk0 type wireguard 2>/dev/null && ip link del wgchk0 || die "kernel has no WireGuard support (need >= 5.6)"; fi
+say "Checking WireGuard support"
+if ip link add wgchk0 type wireguard 2>/dev/null; then ip link del wgchk0; echo "kernel WireGuard: yes"
+elif modprobe wireguard 2>/dev/null && ip link add wgchk0 type wireguard 2>/dev/null; then ip link del wgchk0; echo "kernel WireGuard: yes (module loaded)"
+else
+  echo "kernel WireGuard: not available -> using bundled wireguard-go (userspace, needs /dev/net/tun)"
+  [ -c /dev/net/tun ] || { mkdir -p /dev/net; mknod /dev/net/tun c 10 200 2>/dev/null && chmod 600 /dev/net/tun; }
+  [ -c /dev/net/tun ] || die "no kernel WireGuard and no /dev/net/tun (TUN device) -- cannot create a WARP tunnel on this host"
+fi
 
 say "Creating user + installing files"
 id hysteria >/dev/null 2>&1 || useradd -r -M -s "$(command -v nologin || echo /bin/false)" hysteria
@@ -120,7 +125,7 @@ if [ -n "$LIMIT_UP$LIMIT_DOWN" ]; then
 fi
 
 say "Starting WARP and verifying egress"
-systemctl enable --now wg-quick@warp
+systemctl enable wg-quick@warp; systemctl restart wg-quick@warp
 sleep 4
 TRACE=$(hytool get -t 10 -iface warp https://www.cloudflare.com/cdn-cgi/trace || true)
 echo "$TRACE" | grep -q '^warp=on' || { echo "$TRACE"; die "WARP is not working (no warp=on). Try --regen-warp. Nothing else was started."; }
@@ -132,7 +137,7 @@ if [ -n "$LIMIT_UP$LIMIT_DOWN" ]; then
 fi
 
 say "Starting hysteria + speederv2"
-systemctl enable --now hysteria-guard hysteria-server speederv2-server
+systemctl enable hysteria-guard hysteria-server speederv2-server; systemctl restart hysteria-guard hysteria-server speederv2-server
 sleep 3
 for s in wg-quick@warp hysteria-guard hysteria-server speederv2-server; do
   systemctl is-active --quiet $s || { journalctl -u $s -n 15 --no-pager; die "$s failed to start"; }

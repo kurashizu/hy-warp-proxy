@@ -41,15 +41,15 @@ SSH access to the VPS: `user@host` or an ssh alias; root, or a user with passwor
 ssh <vps> 'uname -m; . /etc/os-release; echo $PRETTY_NAME; uname -r; systemctl --version | head -1; nproc; free -m | sed -n 2p; sudo -n true && echo sudo-ok'
 ssh <vps> 'ss -lun | grep -E ":(443|8443)\b" || echo ports-free'
 ```
-Requirements: `x86_64`; systemd; kernel ≥ 5.6 (built-in WireGuard); root/sudo; Arch, Debian/Ubuntu, or Fedora-like
+Requirements: `x86_64`; systemd; a kernel with WireGuard (≥ 5.6) **or** `/dev/net/tun` (then the bundled `wireguard-go` userspace implementation is used automatically, e.g. Oracle UEK kernels without the module); root/sudo; Arch, Debian/Ubuntu, or Fedora-like
 any distro (the installer uses **no package manager** and downloads nothing from distro repos: `wg`, `wg-quick`, `ip`, `tc`, `nft`, `wgcf`, `hytool` are bundled static binaries in `files/bin`, installed to `/usr/local/lib/hysteria-stack`; only bash, useradd, awk, sed, grep and coreutils must exist on the VPS); UDP 443/8443 not in use; the VPS can send UDP to
-Cloudflare (2408). Not supported: ARM VPS, OpenVZ/LXC without WireGuard support, IPv6-only VPS.
+Cloudflare (2408). Not supported: ARM VPS, containers without WireGuard and without /dev/net/tun, IPv6-only VPS.
 Sizing guide (estimates, not load-tested): 1 vCPU / 512 MB is enough for 1–5 users; 2 vCPU / 1 GB for 100–300 Mbps.
 FEC multiplies traffic up to ~2x and speederv2 is single-threaded, so leave bandwidth headroom.
 
 ### 2. Upload
 ```
-scp -r <bundle dir>/hy-server <vps>:~/        # or: tar czf - hy-server | ssh <vps> 'tar xzf -'
+scp -r <bundle dir>/hy-server <vps>:~/        # use scp: minimal VPS images may not have tar
 ```
 
 ### 3. Install
@@ -107,6 +107,7 @@ Needs kernel modules `sch_htb`, `sch_fq_codel`, `cls_u32`, `act_mirred`, `ifb` (
 |---|---|
 | installer stops: `WARP is not working` | re-run with `--regen-warp`; if it still fails the VPS blocks UDP 2408 → try another WARP endpoint port (500, 1701, 4500) in `/etc/wireguard/warp.conf` **and** change `udp dport 2408` in `/etc/hysteria/guard.nft`, then `systemctl restart wg-quick@warp hysteria-guard hysteria-server` |
 | installer aborts: `could not apply the requested speed limit` | the kernel lacks `ifb`/`sch_htb`/`cls_u32`/`act_mirred`; use a different kernel/VPS, or install without `--limit-down` and accept no download cap |
+| everything times out although `wg show warp` has a handshake (userspace WireGuard) | strict reverse-path filtering; the installer sets `rp_filter=2` on `warp` in PostUp — check `sysctl net.ipv4.conf.warp.rp_filter` |
 | `hysteria-server` not starting | `journalctl -u hysteria-server -n 30`; it requires `wg-quick@warp` (by design) |
 | client says `exit is NOT WARP` | WARP on the server is broken/bypassed: check the `warp` interface (`wg show warp` handshake) and `nft list table inet hyst_guard` |
 | client timeouts | provider firewall: UDP 443/8443 not open; or server not listening: `ss -lun` |
